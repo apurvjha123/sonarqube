@@ -1,4 +1,4 @@
-name: Local SonarQube-style Code Check (Python)
+name: SonarQube Scan with Docker
 
 on:
   push:
@@ -7,48 +7,67 @@ on:
     branches: [ main, develop ]
 
 jobs:
-  quality-check:
+  sonar-docker:
     runs-on: ubuntu-latest
+    services:
+      sonarqube:
+        image: sonarqube:latest
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd="curl -f http://localhost:9000/api/system/health || exit 1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=30
 
     steps:
-      # 1️⃣ Checkout your code
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2️⃣ Set up Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # 3️⃣ Install dependencies + static analysis tools
-      - name: Install dependencies
+      - name: Install dependencies + sonar-scanner
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt || true
-          pip install pytest flake8 bandit coverage
+          pip install -r requirements.txt pytest coverage
 
-      # 4️⃣ Run linting (style + basic quality)
-      - name: Lint with flake8
-        run: |
-          echo "🔍 Running flake8 lint check..."
-          flake8 . --count --max-complexity=10 --max-line-length=120 --statistics
+          curl -sSLo sonar-scanner.zip \
+            https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
+          unzip sonar-scanner.zip -d $HOME/
+          echo "$HOME/sonar-scanner-5.0.1.3006-linux/bin" >> $GITHUB_PATH
 
-      # 5️⃣ Security check (Bandit)
-      - name: Run security scan with Bandit
+      - name: Wait for SonarQube startup
         run: |
-          echo "🛡️ Running security scan..."
-          bandit -r . -ll
+          echo "⏳ Waiting for SonarQube server to be healthy..."
+          for i in {1..30}; do
+            curl -s http://localhost:9000/api/system/status | grep -q '"status":"UP"' && break
+            sleep 5
+          done
 
-      # 6️⃣ Run tests and measure coverage
-      - name: Run tests
+      - name: Run tests + coverage
         run: |
-          echo "🧪 Running tests..."
           coverage run -m pytest
-          coverage report --fail-under=80  # fail if coverage < 80%
+          coverage xml
 
-      # 7️⃣ If all checks pass
-      - name: Success message
-        if: ${{ success() }}
+      - name: Run Sonar Scanner
         run: |
-          echo "✅ All code quality checks passed! Continuing..."
+          sonar-scanner \
+            -Dsonar.projectKey=my_python_project \
+            -Dsonar.sources=. \
+            -Dsonar.host.url=http://localhost:9000 \
+            -Dsonar.login=admin \
+            -Dsonar.password=admin \
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+
+      - name: Check Quality Gate
+        run: |
+          STATUS=$(curl -s -u admin:admin "http://localhost:9000/api/qualitygates/project_status?projectKey=my_python_project" | jq -r '.projectStatus.status')
+          echo "Quality Gate Status: $STATUS"
+          if [ "$STATUS" != "OK" ]; then
+            echo "❌ SonarQube Quality Gate failed!"
+            exit 1
+          else
+            echo "✅ SonarQube Quality Gate passed!"
