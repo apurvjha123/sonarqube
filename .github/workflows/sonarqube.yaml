@@ -1,0 +1,54 @@
+name: Local SonarQube-style Code Check (Python)
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  quality-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout your code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2️⃣ Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3️⃣ Install dependencies + static analysis tools
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          pip install pytest flake8 bandit coverage
+
+      # 4️⃣ Run linting (style + basic quality)
+      - name: Lint with flake8
+        run: |
+          echo "🔍 Running flake8 lint check..."
+          flake8 . --count --max-complexity=10 --max-line-length=120 --statistics
+
+      # 5️⃣ Security check (Bandit)
+      - name: Run security scan with Bandit
+        run: |
+          echo "🛡️ Running security scan..."
+          bandit -r . -ll
+
+      # 6️⃣ Run tests and measure coverage
+      - name: Run tests
+        run: |
+          echo "🧪 Running tests..."
+          coverage run -m pytest
+          coverage report --fail-under=80  # fail if coverage < 80%
+
+      # 7️⃣ If all checks pass
+      - name: Success message
+        if: ${{ success() }}
+        run: |
+          echo "✅ All code quality checks passed! Continuing..."
