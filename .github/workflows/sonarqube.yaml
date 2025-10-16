@@ -84,22 +84,35 @@ jobs:
           echo "PROJECT_KEY=$PROJECT_KEY" >> $GITHUB_ENV
           echo "Using project key: $PROJECT_KEY"
 
-      # 8️⃣ Run SonarQube scan and capture CE task ID
-      - name: Run Sonar Scanner
-        id: sonar_scan
+      # 8️⃣ Run SonarQube scan and fail on issues
+      - name: Run Sonar Scanner and fail on issues
         run: |
           echo "🔍 Running SonarQube scanner..."
+          
+          # Check if coverage.xml exists
+          if [ ! -f coverage.xml ]; then
+            echo "⚠️ coverage.xml not found, skipping coverage report."
+            COVERAGE_ARG=""
+          else
+            COVERAGE_ARG="-Dsonar.python.coverage.reportPaths=coverage.xml"
+          fi
+
           SCAN_OUTPUT=$(sonar-scanner \
             -Dsonar.projectKey=$PROJECT_KEY \
             -Dsonar.sources=. \
             -Dsonar.host.url=http://localhost:9000 \
             -Dsonar.token=$SONAR_TOKEN \
-            -Dsonar.python.coverage.reportPaths=coverage.xml 2>&1)
-          
+            $COVERAGE_ARG \
+            -Dsonar.issuesReport.console.enable=true 2>&1)
+
           echo "$SCAN_OUTPUT"
 
-          # Extract CE task ID from stdout
-          TASK_ID=$(echo "$SCAN_OUTPUT" | grep -oP 'id=\K[0-9a-f-]{36}')
-          echo "TASK_ID=$TASK_ID" >> $GITHUB_ENV
-
-      
+          # Fail workflow if scanner finds any critical/major/blocker issues
+          ISSUES=$(echo "$SCAN_OUTPUT" | grep -E 'CRITICAL|MAJOR|BLOCKER' || true)
+          if [ ! -z "$ISSUES" ]; then
+            echo "❌ SonarQube found issues!"
+            echo "$ISSUES"
+            exit 1
+          else
+            echo "✅ No critical issues found by SonarQube."
+          fi
