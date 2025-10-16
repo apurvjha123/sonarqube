@@ -70,37 +70,42 @@ jobs:
             http://localhost:9000/api/user_tokens/generate | jq -r '.token')
           echo "SONAR_TOKEN=$TOKEN" >> $GITHUB_ENV
 
-      # 6️⃣ Run tests + generate coverage
+      # 6️⃣ Run tests + coverage
       - name: Run tests
         run: |
           echo "🧪 Running tests..."
           coverage run -m pytest || true
           coverage xml || true
 
-      # 7️⃣ Determine dynamic project key (repo name)
+      # 7️⃣ Set dynamic SonarQube project key
       - name: Set SonarQube project key
         run: |
           PROJECT_KEY=${GITHUB_REPOSITORY##*/}
           echo "PROJECT_KEY=$PROJECT_KEY" >> $GITHUB_ENV
           echo "Using project key: $PROJECT_KEY"
 
-      # 8️⃣ Run SonarQube scan
+      # 8️⃣ Run SonarQube scan and capture CE task ID
       - name: Run Sonar Scanner
+        id: sonar_scan
         run: |
           echo "🔍 Running SonarQube scanner..."
-          sonar-scanner \
+          SCAN_OUTPUT=$(sonar-scanner \
             -Dsonar.projectKey=$PROJECT_KEY \
             -Dsonar.sources=. \
             -Dsonar.host.url=http://localhost:9000 \
             -Dsonar.token=$SONAR_TOKEN \
-            -Dsonar.python.coverage.reportPaths=coverage.xml \
-            -Dsonar.scanner.dumpToFile=task.txt
+            -Dsonar.python.coverage.reportPaths=coverage.xml 2>&1)
+          
+          echo "$SCAN_OUTPUT"
 
-      # 9️⃣ Wait for Compute Engine task and check Quality Gate
+          # Extract CE task ID from stdout
+          TASK_ID=$(echo "$SCAN_OUTPUT" | grep -oP 'id=\K[0-9a-f-]{36}')
+          echo "TASK_ID=$TASK_ID" >> $GITHUB_ENV
+
+      # 9️⃣ Wait for CE task and check Quality Gate
       - name: Wait for Quality Gate
         run: |
           echo "🕒 Checking SonarQube Quality Gate..."
-          TASK_ID=$(grep "ceTaskId=" task.txt | cut -d'=' -f2)
           if [ -z "$TASK_ID" ]; then
             echo "❌ Could not find CE task ID!"
             exit 1
