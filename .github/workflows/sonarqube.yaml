@@ -92,11 +92,25 @@ jobs:
       - name: Check Quality Gate
         run: |
           echo "🕒 Checking SonarQube Quality Gate..."
-          STATUS=$(curl -s -u admin:$SONAR_TOKEN \
-            "http://localhost:9000/api/qualitygates/project_status?projectKey=my_python_project" | jq -r '.projectStatus.status')
-          echo "Quality Gate Status: $STATUS"
+          for i in {1..10}; do
+            STATUS=$(curl -s -u admin:$SONAR_TOKEN \
+              "http://localhost:9000/api/qualitygates/project_status?projectKey=my_python_project" | jq -r '.projectStatus.status // empty')
+            if [ -n "$STATUS" ]; then
+              echo "Quality Gate Status: $STATUS"
+              break
+            fi
+            echo "Waiting for Quality Gate to be available..."
+            sleep 5
+          done
+
+          if [ -z "$STATUS" ]; then
+            echo "❌ Could not get Quality Gate status!"
+            exit 1
+          fi
+
           if [ "$STATUS" != "OK" ]; then
             echo "❌ SonarQube Quality Gate failed!"
             exit 1
           else
             echo "✅ SonarQube Quality Gate passed!"
+
